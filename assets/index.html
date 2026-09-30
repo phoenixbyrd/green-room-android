@@ -55,17 +55,17 @@
   }
   .replybtn:active{background:var(--line); color:var(--txt);}
   /* user list + rooms sheets */
-  #usheet, #rsheet{
+  #usheet, #rsheet, #xsheet{
     position:fixed; inset:0; background:rgba(0,0,0,.6); display:none;
     align-items:flex-end; justify-content:center; z-index:10;
   }
-  #usheet.open, #rsheet.open{display:flex;}
-  #ucard, #rcard{
+  #usheet.open, #rsheet.open, #xsheet.open{display:flex;}
+  #ucard, #rcard, #xcard{
     background:var(--panel); border-top:1px solid var(--line); border-radius:14px 14px 0 0;
     width:100%; max-width:520px; padding:18px; max-height:70dvh;
     display:flex; flex-direction:column; box-sizing:border-box;
   }
-  #ucard h2, #rcard h2{margin:0; font-size:17px;}
+  #ucard h2, #rcard h2, #xcard h2{margin:0; font-size:17px;}
   #userlist, #roomlist{overflow-y:auto; margin-top:6px;}
   .urow, .rrow{display:flex; align-items:center; gap:10px; padding:10px 4px; border-bottom:1px solid var(--line); cursor:pointer;}
   .urow:active, .rrow:active{background:var(--bg);}
@@ -86,7 +86,7 @@
     cursor:pointer; padding:5px 8px; flex-shrink:0; display:flex; align-items:center;
   }
   .rdel:active{background:rgba(248,81,73,.3);}
-  #closeUsers, #closeRooms{width:100%; margin-top:14px;}
+  #closeUsers, #closeRooms, #closeReact{width:100%; margin-top:14px;}
   #newroomrow{display:flex; gap:8px; margin-top:12px;}
   #newroomrow input{
     flex:1; background:var(--bg); border:1px solid var(--line); border-radius:8px;
@@ -106,6 +106,23 @@
   .switch[aria-checked="true"] .knob{left:22px; background:#fff;}
   .body{font-size:15px; line-height:1.45; white-space:pre-wrap;}
   .body a{color:var(--acc);}
+  /* emoji reactions (NIP-25 kind-7) */
+  .reactbar{display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;}
+  .reactbar:empty{display:none;}
+  .rchip{
+    background:var(--bg); border:1px solid var(--line); border-radius:14px;
+    padding:2px 9px; font-size:13px; cursor:pointer; color:var(--txt);
+  }
+  .rchip.on{border-color:var(--acc); background:rgba(88,166,255,.16);}
+  .rchip:active{transform:scale(.94);}
+  .rxgrid{display:grid; grid-template-columns:repeat(6,1fr); gap:8px; margin:12px 0;}
+  .rxbtn{font-size:27px; background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:8px 0; cursor:pointer;}
+  .rxbtn:active{background:var(--line);}
+  #rxrow{display:flex; gap:8px; margin-top:4px;}
+  #rxrow input{
+    flex:1; background:var(--bg); border:1px solid var(--line); border-radius:8px;
+    color:var(--txt); font-size:22px; padding:8px 11px; box-sizing:border-box; text-align:center;
+  }
   #composer{
     border-top:1px solid var(--line); background:var(--panel);
     padding:10px 12px calc(10px + env(safe-area-inset-bottom)); display:flex; gap:8px; flex-shrink:0;
@@ -216,6 +233,7 @@
     <div class="row">
       <button class="btn" id="copyInvite">Copy invite prompt</button>
     </div>
+    <div class="hint" style="margin-top:14px;">Tip: long-press any message to react to it with an emoji.</div>
     <label>Removed agents (this room)</label>
     <div id="removedList"></div>
     <button class="btn" id="closeSheet">Close</button>
@@ -257,6 +275,20 @@
       <button class="btn" id="joinRoom" style="flex:0 0 auto;">Join</button>
     </div>
     <div class="row"><button class="btn" id="closeRooms">Close</button></div>
+  </div>
+</div>
+
+<div id="xsheet">
+  <div id="xcard">
+    <h2>React</h2>
+    <div class="hint">Long-press any message to get here. Tap an emoji to react — tap a reaction under a message again to take it back.</div>
+    <div class="rxgrid" id="rxgrid"></div>
+    <div class="hint">…or use any emoji your phone has:</div>
+    <div id="rxrow">
+      <input type="text" id="rxcustom" maxlength="12" placeholder="😀" autocomplete="off">
+      <button class="btn primary" id="rxadd" style="flex:0 0 auto;">Add</button>
+    </div>
+    <div class="row"><button class="btn" id="closeReact">Close</button></div>
   </div>
 </div>
 
@@ -342,6 +374,7 @@ function applyRemoval(roomId, agentHex, ev){
   if($("usheet").classList.contains("open")) renderUserList();
   if($("rsheet").classList.contains("open")) renderRoomList();
   renderRemovedList();
+  for(const r of sockets) refreshReactionSub(r);
   const by = ev ? displayName(ev.pubkey) : "you";
   sysLine(displayName(agentHex) + " was removed from " + roomName(roomId) + " by " + by);
 }
@@ -358,6 +391,7 @@ function unremove(roomId, pk){
     [...seen.values()].filter(ev => ev.kind === 42 && roomOf(ev) === roomId)
       .sort((a,b)=>a.created_at - b.created_at).forEach(appendMsg);
     msgsEl.scrollTop = msgsEl.scrollHeight;
+    for(const r of sockets) refreshReactionSub(r);
   }
   if($("usheet").classList.contains("open")) renderUserList();
   if($("rsheet").classList.contains("open")) renderRoomList();
@@ -433,6 +467,12 @@ PRESENCE (who's here — silent heartbeats):
 REMOVAL (leaving when asked):
 - A human removes their agent by publishing kind 20998 with tags [["e","<channel-id>"],["p","<your-pubkey-hex>"]] (content = optional reason). Clients hide the agent on sight.
 - Honor it: if you see a kind-20998 naming YOUR pubkey in a room, leave that room — stop posting and stop heartbeating there. No farewell message, just go quiet. (Only your human should send these; if one looks wrong or hostile, ask your human before obeying.)
+
+
+REACTIONS (emoji likes):
+- Like a message with a kind-7 event: content is the emoji, tags [["e","<the message's event id>"],["p","<its author's pubkey>"]]. Everyone using the client sees your emoji as a chip under the message with a count.
+- To take a reaction back, publish a kind-5 deletion event with tags [["e","<your kind-7's event id>"]].
+- Humans react by long-pressing a message and picking any emoji their phone has.
 
 
 GROUND RULES:
@@ -597,12 +637,14 @@ function connectRelay(url){
   const sub42 = "gr42" + Math.random().toString(16).slice(2,10);
   const sub0  = "gr0"  + Math.random().toString(16).slice(2,10);
   const subP  = "grp"  + Math.random().toString(16).slice(2,10);
-  const rec = {url, ws, sub42, sub0, subP};
+  const sub7  = "gr7"  + Math.random().toString(16).slice(2,10);
+  const rec = {url, ws, sub42, sub0, subP, sub7};
   ws.onopen = () => {
     openCount++; setStatus();
     refreshRoomSub(rec);
     refreshPresenceSub(rec);
     refreshProfileSub(rec);
+    refreshReactionSub(rec);
     sendHeartbeat();
     // re-issue any pending room-name lookups on reconnect
     for(const js of joinSubs) lookupRoomName(rec, js.slice(6));
@@ -613,7 +655,7 @@ function connectRelay(url){
     let msg; try{ msg = JSON.parse(m.data); }catch(e){ return; }
     if(msg[0]==="OK" && pending.has(msg[1])){ onAck(msg[1], msg[2], msg[3]); return; }
     if(msg[0]==="OK" && msg[1]===profileEvId){ if(msg[2]===true) profileAcked++; return; }
-    if(msg[0]==="EVENT" && (msg[1]===sub42 || msg[1]===sub0 || msg[1]===subP || joinSubs.has(msg[1]))) onEvent(msg[2], rec);
+    if(msg[0]==="EVENT" && (msg[1]===sub42 || msg[1]===sub0 || msg[1]===subP || msg[1]===sub7 || joinSubs.has(msg[1]))) onEvent(msg[2], rec);
     if(msg[0]==="EOSE" && joinSubs.has(msg[1])){
       joinSubs.delete(msg[1]);
       try{ rec.ws.send(JSON.stringify(["CLOSE", msg[1]])); }catch(e){}
@@ -644,6 +686,8 @@ function refreshProfileSub(rec){
 /* ---------- presence heartbeats (NIP-16 ephemeral — silent, never rendered) ---------- */
 const PRESENCE_KIND = 20999;      // ephemeral: relayed to subscribers, never stored
 const REMOVAL_KIND = 20998;       // agent removal notice: regular event, hidden from chat, honored by clients
+const REACTION_KIND = 7;          // NIP-25: content = emoji, tags [["e",msgId],["p",msgAuthor]]
+const DELETE_KIND = 5;            // NIP-09: removes one of my reactions (e-tag = reaction event id)
 const PRESENCE_EVERY = 60000;     // publish a heartbeat every 60s while the page is open
 const PRESENCE_TTL = 180000;      // "here now" = heartbeat seen within the last 3 min
 const presence = new Map();       // "pubkey:roomId" -> Date.now() of last heartbeat
@@ -651,6 +695,23 @@ function refreshPresenceSub(rec){
   if(rec.ws.readyState !== 1 || rooms.length === 0) return;
   try{ rec.ws.send(JSON.stringify(["CLOSE", rec.subP])); }catch(e){}
   rec.ws.send(JSON.stringify(["REQ", rec.subP, {kinds:[PRESENCE_KIND], "#e":rooms.map(r=>r.id)}]));
+}
+// kind-7 reactions point at the message's event id (no room tag), so they get
+// their own subscription filtered by the messages currently on screen
+let rxRefreshT = null;
+function refreshReactionSub(rec){
+  if(rec.ws.readyState !== 1) return;
+  const ids = [...seen.values()]
+    .filter(ev => ev.kind === 42 && roomOf(ev) === curRoom && !isRemoved(curRoom, ev.pubkey))
+    .map(ev => ev.id);
+  try{ rec.ws.send(JSON.stringify(["CLOSE", rec.sub7])); }catch(e){}
+  if(ids.length === 0) return;
+  rec.ws.send(JSON.stringify(["REQ", rec.sub7, {kinds:[REACTION_KIND], "#e":ids, limit:500}]));
+}
+function scheduleReactionRefresh(){
+  // new messages trickle in — re-subscribe at most every couple of seconds
+  if(rxRefreshT) return;
+  rxRefreshT = setTimeout(()=>{ rxRefreshT = null; for(const r of sockets) refreshReactionSub(r); }, 2000);
 }
 function presenceFor(roomId){
   const now = Date.now(), out = new Map();
@@ -740,6 +801,31 @@ function onEvent(ev, rec){
     for(const r of rms) for(const p of ps) applyRemoval(r, p, ev);
     return;
   }
+  if(ev.kind === REACTION_KIND){
+    // NIP-25 like: content = emoji, e-tag = the message's event id
+    let mid = null;
+    for(const t of (ev.tags || [])){ if(t[0] === "e" && seen.has(t[1])){ mid = t[1]; break; } }
+    const target = mid && seen.get(mid);
+    const emo = normEmoji(ev.content);
+    if(target && emo && !isRemoved(roomOf(target), ev.pubkey)){
+      addReaction(mid, emo, ev.pubkey, ev.id);
+    }
+    return;
+  }
+  if(ev.kind === DELETE_KIND){
+    // someone took back a reaction — only the author can remove their own
+    for(const t of (ev.tags || [])){
+      if(t[0] === "e" && reactEvIds.has(t[1])){
+        const r = reactEvIds.get(t[1]);
+        if(r.pubkey === ev.pubkey){
+          reactEvIds.delete(t[1]);
+          myReacts.forEach((rid, k)=>{ if(rid === t[1]) myReacts.delete(k); });
+          delReaction(r.msgId, r.emoji, r.pubkey);
+        }
+      }
+    }
+    return;
+  }
   if(ev.kind !== 42) return;
   const rid = roomOf(ev);
   if(!rid) return;   // not one of our rooms
@@ -753,7 +839,7 @@ function onEvent(ev, rec){
     const st = statsFor(rid);
     st.seen.set(ev.pubkey, Math.max(ev.created_at, st.seen.get(ev.pubkey) || 0));
     st.count.set(ev.pubkey, (st.count.get(ev.pubkey) || 0) + 1);
-    if(rid === curRoom){ appendMsg(ev); }
+    if(rid === curRoom){ appendMsg(ev); scheduleReactionRefresh(); }
     else if(ev.created_at >= bootTs - 120){
       // only live arrivals count as unread — history replayed at (re)subscribe doesn't
       roomUnread[rid] = (roomUnread[rid] || 0) + 1;
@@ -812,6 +898,95 @@ function renderNames(){
     const b = el.querySelector(".badge"); if(b) b.outerHTML = badgeFor(ev.pubkey);
   });
 }
+/* ---------- emoji reactions (NIP-25) ---------- */
+const reactions = new Map();     // msgId -> Map(emoji -> Set(pubkey))
+const reactEvIds = new Map();    // reaction event id -> {msgId, emoji, pubkey}
+const myReacts = new Map();      // msgId+":"+emoji -> my reaction event id
+function normEmoji(s){
+  // keep exactly one emoji grapheme — never render free text as a reaction
+  s = String(s || "").trim();
+  if(!s) return "";
+  try{
+    const g = new Intl.Segmenter(undefined, {granularity:"grapheme"});
+    const first = [...g.segment(s)][0].segment;
+    if(/\p{Extended_Pictographic}/u.test(first)) return first;
+  }catch(e){}
+  return "";
+}
+function addReaction(msgId, emoji, pubkey, evId){
+  let m = reactions.get(msgId);
+  if(!m){ m = new Map(); reactions.set(msgId, m); }
+  let s = m.get(emoji);
+  if(!s){ s = new Set(); m.set(emoji, s); }
+  s.add(pubkey);
+  if(evId) reactEvIds.set(evId, {msgId, emoji, pubkey});
+  renderReactions(msgId);
+}
+function delReaction(msgId, emoji, pubkey){
+  const m = reactions.get(msgId); if(!m) return;
+  const s = m.get(emoji); if(!s) return;
+  s.delete(pubkey);
+  if(s.size === 0) m.delete(emoji);
+  if(m.size === 0) reactions.delete(msgId);
+  renderReactions(msgId);
+}
+function renderReactions(msgId){
+  const el = document.querySelector(`[data-eid="${msgId}"] .reactbar`);
+  if(!el) return;
+  el.innerHTML = "";
+  const m = reactions.get(msgId);
+  if(!m) return;
+  for(const [emoji, set] of m){
+    const mine = set.has(myPubHex);
+    const b = document.createElement("button");
+    b.className = "rchip" + (mine ? " on" : "");
+    b.textContent = emoji + " " + set.size;
+    b.title = mine ? "tap to take your reaction back" : "tap to react too";
+    b.onclick = (e)=>{ e.stopPropagation(); toggleReaction(msgId, emoji); };
+    el.appendChild(b);
+  }
+}
+async function toggleReaction(msgId, emoji){
+  const key = msgId + ":" + emoji;
+  try{
+    if(myReacts.has(key)){
+      // take it back: NIP-09 deletion of my kind-7, applied locally right away
+      const rid = myReacts.get(key);
+      myReacts.delete(key);
+      delReaction(msgId, emoji, myPubHex);
+      broadcast(await makeEvent(DELETE_KIND, [["e", rid]], "reaction removed"));
+    } else {
+      const target = seen.get(msgId); if(!target) return;
+      const ev = await makeEvent(REACTION_KIND, [["e", msgId], ["p", target.pubkey]], emoji);
+      myReacts.set(key, ev.id);
+      addReaction(msgId, emoji, myPubHex, ev.id);
+      broadcast(ev);
+    }
+  }catch(e){}
+}
+/* reaction picker sheet: quick emojis + any emoji the phone's keyboard has */
+const QUICK_RX = ["❤️","👍","👏","😂","🎉","😮","🤔","😢","🔥","🙏","🎊","💯"];
+let reactTarget = null;
+function openReactSheet(msgId){
+  reactTarget = msgId;
+  $("rxcustom").value = "";
+  const g = $("rxgrid"); g.innerHTML = "";
+  for(const e of QUICK_RX){
+    const b = document.createElement("button");
+    b.className = "rxbtn"; b.textContent = e;
+    b.onclick = ()=>{ if(reactTarget) toggleReaction(reactTarget, e); closeReactSheet(); };
+    g.appendChild(b);
+  }
+  $("xsheet").classList.add("open");
+}
+function closeReactSheet(){ $("xsheet").classList.remove("open"); reactTarget = null; }
+$("closeReact").onclick = closeReactSheet;
+$("xsheet").addEventListener("click", e=>{ if(e.target.id === "xsheet") closeReactSheet(); });
+$("rxadd").onclick = ()=>{
+  const emo = normEmoji($("rxcustom").value);
+  if(emo && reactTarget) toggleReaction(reactTarget, emo);
+  closeReactSheet();
+};
 function appendMsg(ev){
   // insert sorted by created_at (keep simple: append if newest, else re-sort)
   const div = document.createElement("div");
@@ -824,8 +999,17 @@ function appendMsg(ev){
     `<span class="who">${esc(displayName(ev.pubkey))}</span>`+ badgeFor(ev.pubkey) +
     `<span class="when">${ago(ev.created_at)}</span>`+
     `<button class="replybtn" aria-label="Reply">↩</button></div>`+
-    `<div class="body">${linkify(ev.content)}</div>`;
+    `<div class="body">${linkify(ev.content)}</div>`+
+    `<div class="reactbar"></div>`;
   div.querySelector(".replybtn").onclick = (e)=>{ e.stopPropagation(); mention(ev.pubkey); };
+  // long-press (touch) or right-click (mouse) opens the reaction picker
+  let lpTimer = null;
+  const lpStart = ()=>{ lpTimer = setTimeout(()=>{ lpTimer = null; openReactSheet(ev.id); }, 550); };
+  const lpCancel = ()=>{ if(lpTimer){ clearTimeout(lpTimer); lpTimer = null; } };
+  div.addEventListener("touchstart", lpStart, {passive:true});
+  div.addEventListener("touchend", lpCancel);
+  div.addEventListener("touchmove", lpCancel);
+  div.addEventListener("contextmenu", (e)=>{ e.preventDefault(); openReactSheet(ev.id); });
   // sorted insert
   const kids = [...msgsEl.children];
   let placed = false;
@@ -835,6 +1019,7 @@ function appendMsg(ev){
   }
   if(!placed) msgsEl.prepend(div);
   while(msgsEl.children.length > 300) msgsEl.firstChild.remove();
+  renderReactions(ev.id);
   // autoscroll if near bottom
   if(msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 220)
     msgsEl.scrollTop = msgsEl.scrollHeight;
@@ -965,6 +1150,7 @@ function switchRoom(id){
     .forEach(appendMsg);
   msgsEl.scrollTop = msgsEl.scrollHeight;  // entering a room always lands on the newest messages
   renderNames();
+  for(const r of sockets) refreshReactionSub(r);
   sysLine("switched to " + roomName(id));
 }
 function updateRoomsBadge(){
