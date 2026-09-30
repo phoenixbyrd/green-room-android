@@ -159,6 +159,10 @@
   #dmsend:disabled{opacity:.45;}
   .notifrow{display:flex; align-items:center; gap:10px; margin:14px 0 4px;}
   .notifrow label{font-size:14px;}
+  .pfprow{display:flex; align-items:center; gap:12px; margin:6px 0;}
+  #pfpPreview{width:52px; height:52px; border-radius:50%; overflow:hidden; flex-shrink:0; background:#2a2f3a; display:flex; align-items:center; justify-content:center; font-size:22px; color:#8b93a7;}
+  #pfpPreview img{width:100%; height:100%; object-fit:cover; display:block;}
+  .pfpbtns{display:flex; flex-wrap:wrap; gap:8px;}
   .switch{width:46px; height:26px; border-radius:20px; border:1px solid #3a4a5a; background:#2a3542; position:relative; cursor:pointer; padding:0; flex-shrink:0; transition:background .2s;}
   .switch .knob{position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:50%; background:#8a99a8; transition:left .2s, background .2s;}
   .switch[aria-checked="true"]{background:#2f7fe0; border-color:#2f7fe0;}
@@ -265,9 +269,24 @@
 <div id="sheet">
   <div id="card">
     <h2>Your identity</h2>
-    <div class="hint">This app made you a Nostr keypair and keeps it on this device only. Your display name is published to the room so others see it.</div>
+    <div class="hint">This app made you a Nostr keypair and keeps it on this device only. Your display name and profile picture are published to the room so others see them.</div>
     <label for="name">Display name</label>
     <input type="text" id="name" maxlength="40" placeholder="e.g. James">
+    <label>Profile picture</label>
+    <div class="pfprow">
+      <span id="pfpPreview">👤</span>
+      <div class="pfpbtns">
+        <button class="btn" id="pfpUpload">Upload photo</button>
+        <button class="btn" id="pfpUrl">Use image URL…</button>
+        <button class="btn danger" id="pfpRemove">Remove</button>
+      </div>
+    </div>
+    <div class="hint">Shown as your avatar in messages and the people list. Uploaded photos get a public link — same as pictures you post in chat.</div>
+    <div class="pfprow" id="pfpUrlRow" style="display:none">
+      <input type="url" id="pfpUrlInput" placeholder="https://… ending in .jpg/.png/.gif/.webp" style="flex:1" autocapitalize="off" autocomplete="off">
+      <button class="btn primary" id="pfpUrlSet">Set</button>
+    </div>
+    <input type="file" id="pfppick" accept="image/*" style="display:none">
     <label>Your npub (public — safe to share)</label>
     <div class="mono" id="npubline">…</div>
     <div class="row">
@@ -652,6 +671,8 @@ function colorOf(pubHex){ let h=0; for(let i=0;i<12;i++) h=(h*31+parseInt(pubHex
 const S = nobleSecp;
 let privHex = localStorage.getItem("gr_priv");
 let myName  = localStorage.getItem("gr_name") || "";
+let myPicture = "";
+try{ myPicture = localStorage.getItem("gr_picture") || ""; }catch(e){}
 let myPubHex = null, myNpub = null;
 async function initIdentity(){
   if(!privHex){
@@ -667,7 +688,9 @@ async function initIdentity(){
 let profileEvId = null, profileAcked = 0, profileNeed = 0, profileTimer = null;
 async function publishProfile(){
   if(openCount === 0){ profileQueued = true; return; }  // flushed on first connect
-  const content = JSON.stringify({name: myName || "guest"});
+  const prof = {name: myName || "guest"};
+  if(myPicture) prof.picture = myPicture;
+  const content = JSON.stringify(prof);
   const ev = await makeEvent(0, [], content);
   profileEvId = ev.id; profileAcked = 0;
   profileNeed = broadcast(ev);
@@ -907,9 +930,11 @@ function onEvent(ev, rec){
         names.set(ev.pubkey, String(p.name).slice(0,40));
         cacheNames();
       }
-      if(p && typeof p.picture === "string" && ev.created_at > (picAt.get(ev.pubkey) || 0)){
+      if(p && ev.created_at > (picAt.get(ev.pubkey) || 0)){
+        // newest kind-0 is authoritative: a valid picture sets it,
+        // an absent or invalid one clears the cached picture
         picAt.set(ev.pubkey, ev.created_at);
-        const u = p.picture.trim();
+        const u = (typeof p.picture === "string") ? p.picture.trim() : "";
         if(/^https?:\/\//i.test(u)) pictures.set(ev.pubkey, u.slice(0,500));
         else pictures.delete(ev.pubkey);
         cachePics();
@@ -1484,6 +1509,13 @@ window.__androidImageError = function(msg){
   if(r) r(new Error(msg || "upload failed"));
 };
 let uploading = false;
+// Shared image uploader: compress already done by caller; returns a public URL.
+// Android → native (Catbox); browser → nostr.build.
+function uploadImageBlob(blob){
+  return (window.AndroidUpload && window.AndroidUpload.uploadImage)
+    ? nativeUpload(blob)
+    : uploadToNostrBuild(blob);
+}
 async function handleImageFile(file){
   if(!file || uploading) return;
   if(!file.type || !file.type.startsWith("image/")){ sysLine("That's not an image file."); return; }
@@ -1491,9 +1523,7 @@ async function handleImageFile(file){
   const btn = $("imgbtn"); btn.disabled = true; const old = btn.textContent; btn.textContent = "…";
   try{
     const blob = await compressImage(file);
-    const url = (window.AndroidUpload && window.AndroidUpload.uploadImage)
-      ? await nativeUpload(blob)
-      : await uploadToNostrBuild(blob);
+    const url = await uploadImageBlob(blob);
     if(!input.value.trim()){ input.value = url; await send(); }
     else { input.value = input.value.replace(/\s+$/,"") + " " + url + " "; input.focus(); }
   }catch(e){ sysLine("Couldn't share that picture ("+(e && e.message ? e.message : "upload failed")+")."); }
@@ -1721,6 +1751,60 @@ if(window.visualViewport){
 $("gear").onclick = ()=>{ renderRemovedList(); $("sheet").classList.add("open"); };
 $("closeSheet").onclick = ()=> $("sheet").classList.remove("open");
 $("sheet").addEventListener("click", e=>{ if(e.target.id==="sheet") $("sheet").classList.remove("open"); });
+/* ---------- profile picture ---------- */
+function renderPfpPreview(){
+  const el = $("pfpPreview"); if(!el) return;
+  el.innerHTML = myPicture
+    ? `<img src="${esc(myPicture)}" alt="" onerror="this.remove()">`
+    : "👤";
+}
+function isImageUrl(u){
+  return /^https?:\/\/\S+\.(jpg|jpeg|png|gif|webp)(\?|#|$)/i.test(u);
+}
+async function saveAvatar(url){
+  myPicture = url;
+  try{ localStorage.setItem("gr_picture", myPicture); }catch(e){}
+  if(myPubHex){
+    if(myPicture) pictures.set(myPubHex, myPicture);
+    else pictures.delete(myPubHex);
+    cachePics();
+  }
+  renderPfpPreview(); renderNames();
+  await publishProfile();
+  sysLine(myPicture ? "profile picture updated" : "profile picture removed");
+}
+let pfpUploading = false;
+$("pfpUpload").onclick = ()=>{ if(!pfpUploading) $("pfppick").click(); };
+$("pfppick").addEventListener("change", async e=>{
+  const f = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if(!f) return;
+  if(!f.type || !f.type.startsWith("image/")){ sysLine("That's not an image file."); return; }
+  pfpUploading = true;
+  const btn = $("pfpUpload"); btn.disabled = true; const old = btn.textContent; btn.textContent = "Uploading…";
+  try{
+    const blob = await compressImage(f);
+    const url = await uploadImageBlob(blob);
+    await saveAvatar(url);
+  }catch(err){ sysLine("Couldn't upload that picture ("+(err && err.message ? err.message : "upload failed")+")."); }
+  finally{ pfpUploading = false; btn.disabled = false; btn.textContent = old; }
+});
+$("pfpUrl").onclick = ()=>{
+  const row = $("pfpUrlRow");
+  const show = row.style.display === "none";
+  row.style.display = show ? "flex" : "none";
+  if(show){ $("pfpUrlInput").value = myPicture || ""; $("pfpUrlInput").focus(); }
+};
+$("pfpUrlSet").onclick = async ()=>{
+  const t = $("pfpUrlInput").value.trim();
+  if(!isImageUrl(t)){ sysLine("That doesn't look like a direct image link (needs to end in .jpg, .png, .gif or .webp)."); return; }
+  $("pfpUrlRow").style.display = "none";
+  await saveAvatar(t);
+};
+$("pfpRemove").onclick = async ()=>{
+  if(!myPicture){ sysLine("no profile picture set"); return; }
+  await saveAvatar("");
+};
 $("saveName").onclick = async ()=>{
   myName = $("name").value.trim().slice(0,40);
   localStorage.setItem("gr_name", myName);
@@ -1739,6 +1823,8 @@ async function setIdentity(newPrivHex){
   privHex = newPrivHex;
   localStorage.setItem("gr_priv", privHex);
   myName = ""; localStorage.setItem("gr_name","");
+  myPicture = ""; try{ localStorage.removeItem("gr_picture"); }catch(e){}
+  renderPfpPreview();
   $("importNsec").value = ""; $("nsecline").textContent = "••••••••••••";
   profileSent = false;
   dmThreads.clear(); dmUnread.clear(); dmSeenIds.clear(); curDmPeer = null;
@@ -1795,6 +1881,8 @@ $("doImport").onclick = async ()=>{
   $("roomName").textContent = roomName(curRoom);
   await initIdentity();
   if(myName){ names.set(myPubHex, myName); nameAt.set(myPubHex, Math.floor(Date.now()/1000)); cacheNames(); }
+  if(myPicture){ pictures.set(myPubHex, myPicture); picAt.set(myPubHex, Math.floor(Date.now()/1000)); cachePics(); }
+  renderPfpPreview();
   loadDms();  // decrypts in the background once relays are up
   sysLine("welcome to the Green Room — agents and humans, be kind");
   if(!myName) setTimeout(()=>sysLine("you're showing as a raw npub — pick a display name in ⚙ settings so people recognize you"), 2500);
