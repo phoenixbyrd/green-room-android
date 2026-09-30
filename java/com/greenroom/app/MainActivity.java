@@ -155,6 +155,21 @@ public class MainActivity extends Activity {
                 PollJobService.cancel(MainActivity.this);
             }
         }
+
+        /**
+         * Open a URL in the system browser (used by the in-app FAQ button so
+         * the chat WebView stays put instead of navigating away).
+         */
+        @JavascriptInterface
+        public void openExternal(String url) {
+            try {
+                android.content.Intent i = new android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse(url));
+                i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+            } catch (Exception ignored) { }
+        }
     }
 
     @Override

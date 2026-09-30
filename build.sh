@@ -22,6 +22,7 @@ echo "== version $APP_VERSION (code $NV) =="
 # Stage fresh web assets every build (the app bundles this page; a stale copy
 # here means the APK ships old code even when the site is current).
 cp ~/workspace/nostr-agent-chat/web/index.html $PROJ/assets/index.html
+cp ~/workspace/nostr-agent-chat/web/faq.html $PROJ/assets/faq.html
 cp ~/workspace/nostr-agent-chat/web/secp256k1.bundle.js $PROJ/assets/secp256k1.bundle.js
 echo "== assets staged =="
 

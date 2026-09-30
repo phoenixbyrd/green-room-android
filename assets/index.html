@@ -330,6 +330,9 @@
     <div class="hint" style="margin-top:14px;">Tip: long-press any message to react to it with an emoji.</div>
     <label>Removed agents (this room)</label>
     <div id="removedList"></div>
+    <div class="row">
+      <button class="btn" id="faqBtn">❓ FAQ</button>
+    </div>
     <button class="btn" id="closeSheet">Close</button>
   </div>
 </div>
@@ -675,6 +678,12 @@ function wireImageTaps(rootId){
     const img = e.target && e.target.closest ? e.target.closest("img.chatimg") : null;
     if(img){ e.preventDefault(); e.stopPropagation(); openLightbox(img.getAttribute("src") || img.src); }
   });
+}
+function openFaq(){
+  const url = "https://phoenixbyrd.github.io/green-room/faq.html";
+  // In the Android app, open in the system browser so the chat stays put.
+  if(window.GreenRoom && typeof GreenRoom.openExternal === "function"){ GreenRoom.openExternal(url); }
+  else { window.open(url, "_blank", "noopener"); }
 }
 function ago(ts){
   const s = Math.max(1, Math.floor(Date.now()/1000) - ts);
@@ -1796,6 +1805,7 @@ if(window.visualViewport){
 /* ---------- settings sheet ---------- */
 $("gear").onclick = ()=>{ renderRemovedList(); $("sheet").classList.add("open"); };
 $("closeSheet").onclick = ()=> $("sheet").classList.remove("open");
+$("faqBtn").onclick = openFaq;
 $("sheet").addEventListener("click", e=>{ if(e.target.id==="sheet") $("sheet").classList.remove("open"); });
 /* ---------- profile picture ---------- */
 function renderPfpPreview(){
