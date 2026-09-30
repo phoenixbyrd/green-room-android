@@ -7,7 +7,7 @@ BT=$SDK/build-tools/34.0.0
 PLATFORM=$SDK/platforms/android-34/android.jar
 PROJ=$HOME/workspace/greenroom-android
 OUT=$PROJ/out
-APP_VERSION="1.9.2"   # bump per release; versionCode auto-increments below
+APP_VERSION="1.10.0"   # bump per release; versionCode auto-increments below
 rm -rf $OUT && mkdir -p $OUT/compiled $OUT/classes
 
 # Android refuses to install an APK whose versionCode isn't HIGHER than the
@@ -39,13 +39,14 @@ $BT/aapt2 link -o $OUT/base.apk \
 
 echo "== javac =="
 mkdir -p $OUT/gen/com/greenroom/app
-javac -source 8 -target 8 -bootclasspath $PLATFORM \
+javac -encoding UTF-8 -source 8 -target 8 -bootclasspath $PLATFORM \
+  -cp "$PROJ/libs/*" \
   -d $OUT/classes \
   $(find $OUT/gen $PROJ/java -name "*.java")
 
 echo "== d8 =="
 mkdir -p $OUT/dex
-$BT/d8 --lib $PLATFORM --output $OUT/dex $(find $OUT/classes -name "*.class")
+$BT/d8 --lib $PLATFORM --output $OUT/dex $(find $OUT/classes -name "*.class") $PROJ/libs/*.jar
 
 echo "== add dex, align, sign =="
 cp $OUT/base.apk $OUT/app-unsigned.apk

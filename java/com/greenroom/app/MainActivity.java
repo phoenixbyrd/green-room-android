@@ -55,6 +55,33 @@ public class MainActivity extends Activity {
                 @Override public void run() { showNotification(t, b); }
             });
         }
+
+        /**
+         * Called from the chat page whenever rooms or identity change:
+         * GreenRoom.setPollState(jsonRooms, pubkeyHex).
+         * jsonRooms: [{"id":"<64-hex channel>","name":"..."}]
+         */
+        @JavascriptInterface
+        public void setPollState(String roomsJson, String pubkeyHex) {
+            getSharedPreferences("gr_poll", MODE_PRIVATE).edit()
+                    .putString("rooms", roomsJson == null ? "[]" : roomsJson)
+                    .putString("pubkey", pubkeyHex == null ? "" : pubkeyHex)
+                    .apply();
+        }
+
+        /**
+         * Called from the chat page when the notification toggle flips:
+         * GreenRoom.setNotifyEnabled(true/false). Starts or stops the
+         * 15-minute background poll.
+         */
+        @JavascriptInterface
+        public void setNotifyEnabled(boolean on) {
+            getSharedPreferences("gr_poll", MODE_PRIVATE).edit()
+                    .putBoolean("notify_on", on)
+                    .apply();
+            if (on) PollJobService.schedule(MainActivity.this);
+            else PollJobService.cancel(MainActivity.this);
+        }
     }
 
     private void showNotification(String title, String body) {

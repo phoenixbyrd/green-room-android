@@ -192,7 +192,7 @@
       <button class="switch" id="notifyToggle" role="switch" aria-checked="false" aria-label="Message notifications"><span class="knob"></span></button>
       <label>Message notifications</label>
     </div>
-    <div class="hint">Pops up a notification when someone posts. On this site it uses browser notifications; in the Android app it uses system notifications. Only fires while the app or site is open. If the toggle won't switch on, notifications are blocked for this site — allow them in your browser's site settings, then try again.</div>
+    <div class="hint">Pops up a notification when someone posts. In the Android app it uses system notifications and keeps checking about every 15 minutes even with the app closed. On this site it uses browser notifications and only fires while the site is open. If the toggle won't switch on, notifications are blocked for this site — allow them in your browser's site settings, then try again.</div>
     <div class="row">
       <button class="btn primary" id="saveName">Save name</button>
       <button class="btn danger" id="newIdent">New identity</button>
@@ -274,6 +274,18 @@ let curRoom = localStorage.getItem("gr_room") || rooms[0].id;
 if(!roomById[curRoom]) curRoom = rooms[0].id;
 function saveRooms(){
   try{ localStorage.setItem("gr_rooms", JSON.stringify(rooms)); localStorage.setItem("gr_room", curRoom); }catch(e){}
+  pushPollState();
+}
+/* Tell the Android app's background poller about our rooms + identity (no-op on the website). */
+function pushPollState(){
+  try{
+    if(window.GreenRoom && typeof window.GreenRoom.setPollState === "function" && typeof myPubHex === "string" && myPubHex){
+      window.GreenRoom.setPollState(JSON.stringify(rooms.map(r=>({id:r.id, name:r.name}))), myPubHex);
+    }
+    if(window.GreenRoom && typeof window.GreenRoom.setNotifyEnabled === "function"){
+      window.GreenRoom.setNotifyEnabled(!!notifyOn);
+    }
+  }catch(e){}
 }
 function roomName(id){ return (roomById[id] && roomById[id].name) || "a room"; }
 // which known room does this kind-42 belong to? (prefer the "root" marker)
@@ -896,6 +908,7 @@ async function setIdentity(newPrivHex){
   $("importNsec").value = ""; $("nsecline").textContent = "••••••••••••";
   profileSent = false;
   await initIdentity(); await publishProfile(); renderNames();
+  pushPollState();
 }
 let nsecShown = false;
 $("showNsec").onclick = ()=>{
@@ -923,6 +936,7 @@ $("notifyToggle").onclick = async ()=>{
   notifyOn = on;
   try{ localStorage.setItem("gr_notify", on ? "1" : "0"); }catch(err){}
   paintNotifyToggle();
+  pushPollState();
   sysLine("notifications " + (on ? "on" : "off"));
 };
 $("doImport").onclick = async ()=>{
@@ -948,6 +962,7 @@ $("doImport").onclick = async ()=>{
   if(myName) publishProfile();
   setInterval(()=>{ document.querySelectorAll(".msg .when").forEach(()=>{}); }, 60000);
   window.addEventListener("beforeunload", ()=>{ wantSub=false; });
+  pushPollState();
 })();
 </script>
 </body>
