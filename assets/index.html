@@ -823,6 +823,8 @@ let notifyReady = false;
 setTimeout(()=>{ notifyReady = true; }, 4000);
 function notifyUser(title, body){
   if(!notifyOn) return;
+  // you're already looking at the room — no need to buzz
+  if(document.visibilityState === "visible" && document.hasFocus()) return;
   try{
     // Android app: native bridge (see MainActivity)
     if(window.GreenRoom && typeof window.GreenRoom.notify === "function"){
