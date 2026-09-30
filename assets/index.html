@@ -71,6 +71,7 @@
   .urow:active, .rrow:active{background:var(--bg);}
   .urow .uname, .rrow .rname{font-size:15px; font-weight:600;}
   .urow .umeta{font-size:12px; color:var(--dim); margin-left:auto; flex-shrink:0;}
+  .usec{font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); padding:12px 4px 2px;}
   .livedot{display:inline-block; width:8px; height:8px; border-radius:50%; background:#3fb950; margin-right:6px;}
   .youflag{font-size:11px; color:var(--acc); border:1px solid var(--acc); border-radius:6px; padding:1px 6px; flex-shrink:0;}
   .rcheck{color:var(--acc); font-weight:700; flex-shrink:0; width:18px;}
@@ -768,21 +769,41 @@ function mention(pubHex){
   if(!input.value.includes(tag)) input.value = tag + input.value;
   input.focus();
 }
+function userRow(pk, live, meta){
+  const row = document.createElement("div");
+  row.className = "urow"; row.dataset.pub = pk;
+  row.innerHTML =
+    `<span class="avatar" style="background:${colorOf(pk)}"></span>`+
+    `<span class="uname">${esc(displayName(pk))}</span>`+ badgeFor(pk) +
+    (pk === myPubHex ? `<span class="youflag">you</span>` : ``)+
+    (live ? `<span class="umeta"><span class="livedot"></span>here now</span>`
+          : `<span class="umeta">${esc(meta || "")}</span>`);
+  return row;
+}
 function renderUserList(){
   const list = $("userlist");
-  const rows = [...presenceFor(curRoom).entries()].sort((a,b)=>b[1]-a[1]);
-  $("ucount").textContent = rows.length + (rows.length === 1 ? " person" : " people") +
-    " in " + roomName(curRoom) + " right now · tap one to mention them";
+  const here = [...presenceFor(curRoom).entries()].sort((a,b)=>b[1]-a[1]);
+  const hereSet = new Set(here.map(([pk])=>pk));
+  const st = statsFor(curRoom);
+  const rest = [...st.seen.entries()].filter(([pk])=>!hereSet.has(pk)).sort((a,b)=>b[1]-a[1]);
+  const total = here.length + rest.length;
+  $("ucount").textContent =
+    (here.length ? here.length + " here now · " : "") +
+    total + (total === 1 ? " person" : " people") +
+    " in " + roomName(curRoom) + " · tap one to mention them";
   list.innerHTML = "";
-  for(const [pk] of rows){
-    const row = document.createElement("div");
-    row.className = "urow"; row.dataset.pub = pk;
-    row.innerHTML =
-      `<span class="avatar" style="background:${colorOf(pk)}"></span>`+
-      `<span class="uname">${esc(displayName(pk))}</span>`+ badgeFor(pk) +
-      (pk === myPubHex ? `<span class="youflag">you</span>` : ``)+
-      `<span class="umeta"><span class="livedot"></span>here now</span>`;
-    list.appendChild(row);
+  if(here.length){
+    const h = document.createElement("div"); h.className = "usec"; h.textContent = "Here now";
+    list.appendChild(h);
+    for(const [pk] of here) list.appendChild(userRow(pk, true));
+  }
+  if(rest.length){
+    const h = document.createElement("div"); h.className = "usec"; h.textContent = "In the conversation";
+    list.appendChild(h);
+    for(const [pk, ts] of rest){
+      const c = st.count.get(pk) || 0;
+      list.appendChild(userRow(pk, false, c + (c === 1 ? " message" : " messages") + " · " + ago(ts)));
+    }
   }
 }
 $("people").onclick = ()=>{ renderUserList(); $("usheet").classList.add("open"); };
@@ -834,6 +855,7 @@ function switchRoom(id){
     .filter(ev => ev.kind === 42 && roomOf(ev) === id)
     .sort((a,b)=>a.created_at - b.created_at)
     .forEach(appendMsg);
+  msgsEl.scrollTop = msgsEl.scrollHeight;  // entering a room always lands on the newest messages
   renderNames();
   sysLine("switched to " + roomName(id));
 }
@@ -851,11 +873,12 @@ function renderRoomList(){
     const row = document.createElement("div");
     row.className = "rrow"; row.dataset.rid = r.id;
     const un = roomUnread[r.id] || 0;
-    const n = presenceFor(r.id).size;
+    const n = statsFor(r.id).seen.size;
+    const live = presenceFor(r.id).size;
     row.innerHTML =
       `<span class="rcheck">${r.id === curRoom ? "✓" : ""}</span>`+
       `<span class="rname">${esc(r.name)}</span>`+
-      `<span class="rcount" title="people here now">👥 ${n}</span>`+
+      `<span class="rcount" title="people seen posting here${live ? ` · ${live} here now` : ``}">👥 ${n}${live ? ` <span class="livedot" title="${live} here now"></span>` : ``}</span>`+
       `<span class="rspacer"></span>`+
       (un > 0 ? `<span class="unread">${un}</span>` : ``)+
       (rooms.length > 1 ? `<button class="rdel" data-rm="${r.id}" aria-label="Leave room">${trash}</button>` : ``);
@@ -940,6 +963,7 @@ async function send(){
     const ev = await makeEvent(42, [["e", curRoom, RELAYS[0], "root"]], text);
     const n = broadcast(ev);
     if(!seen.has(ev.id)){ seen.set(ev.id, ev); appendMsg(ev); }
+    msgsEl.scrollTop = msgsEl.scrollHeight;  // always land on the newest message after sending
     input.value=""; input.style.height="auto";
     if(n===0) sysLine("not connected — message kept locally, try again");
   }catch(e){ sysLine("send failed: "+e.message); }
