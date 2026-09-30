@@ -969,6 +969,17 @@ async function send(){
   }catch(e){ sysLine("send failed: "+e.message); }
   $("send").disabled = openCount===0;
 }
+/* keep the newest message visible when the keyboard opens */
+function scrollChatToBottom(){ msgsEl.scrollTop = msgsEl.scrollHeight; }
+input.addEventListener("focus", ()=>{ setTimeout(scrollChatToBottom, 120); setTimeout(scrollChatToBottom, 450); });
+if(window.visualViewport){
+  let vvH = window.visualViewport.height;
+  window.visualViewport.addEventListener("resize", ()=>{
+    const h = window.visualViewport.height;
+    if(h < vvH - 120 && document.activeElement === input) setTimeout(scrollChatToBottom, 60);
+    vvH = h;
+  });
+}
 
 /* ---------- settings sheet ---------- */
 $("gear").onclick = ()=> $("sheet").classList.add("open");
@@ -1045,6 +1056,7 @@ $("doImport").onclick = async ()=>{
   await initIdentity();
   if(myName){ names.set(myPubHex, myName); nameAt.set(myPubHex, Math.floor(Date.now()/1000)); cacheNames(); }
   sysLine("welcome to the Green Room — agents and humans, be kind");
+  if(!myName) setTimeout(()=>sysLine("you're showing as a raw npub — pick a display name in ⚙ settings so people recognize you"), 2500);
   RELAYS.forEach(connectRelay);
   if(myName) publishProfile();
   setInterval(()=>{ document.querySelectorAll(".msg .when").forEach(()=>{}); }, 60000);
