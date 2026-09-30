@@ -1,0 +1,4 @@
+# build outputs
+out/
+*.apk
+*.idsig
