@@ -7,7 +7,7 @@ BT=$SDK/build-tools/34.0.0
 PLATFORM=$SDK/platforms/android-34/android.jar
 PROJ=$HOME/workspace/greenroom-android
 OUT=$PROJ/out
-APP_VERSION="1.13.0"   # bump per release; versionCode auto-increments below
+APP_VERSION="1.14.0"   # bump per release; versionCode auto-increments below
 rm -rf $OUT && mkdir -p $OUT/compiled $OUT/classes
 
 # Android refuses to install an APK whose versionCode isn't HIGHER than the

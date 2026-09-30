@@ -22,10 +22,17 @@ public class MainActivity extends Activity {
     private int notifId = 1000;
     private ValueCallback<Uri[]> filePathCallback;
     private static final int REQ_PICK_IMAGE = 42;
+    /**
+     * How many of our activities currently exist (foreground or cached in
+     * the background). ListenerService stays silent while this is > 0 —
+     * the page's own WebSocket already notifies, so this prevents doubles.
+     */
+    public static volatile int activityCount = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        activityCount++;
         web = new WebView(this);
         setContentView(web);
         WebSettings s = web.getSettings();
@@ -70,6 +77,21 @@ public class MainActivity extends Activity {
                         != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1);
         }
+        // If notifications are on but the realtime listener isn't running
+        // (reboot, update, process death), start it now and retire the
+        // 15-minute poll — the listener replaces it.
+        boolean notifyOn = getSharedPreferences("gr_poll", MODE_PRIVATE)
+                .getBoolean("notify_on", false);
+        if (notifyOn && !ListenerService.isRunning()) {
+            PollJobService.cancel(this);
+            ListenerService.start(this);
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        activityCount = Math.max(0, activityCount - 1);
+        super.onDestroy();
     }
 
     /** Called from the chat page: GreenRoom.notify(title, body). */
@@ -85,28 +107,53 @@ public class MainActivity extends Activity {
         /**
          * Called from the chat page whenever rooms or identity change:
          * GreenRoom.setPollState(jsonRooms, pubkeyHex).
-         * jsonRooms: [{"id":"<64-hex channel>","name":"..."}]
+         * jsonRooms: [{"id":"<64-hex channel>","name":"...","seen":<max created_at rendered>}]
+         * The per-room "seen" timestamps keep the background listener from
+         * re-notifying messages already read while the app was open.
          */
         @JavascriptInterface
         public void setPollState(String roomsJson, String pubkeyHex) {
-            getSharedPreferences("gr_poll", MODE_PRIVATE).edit()
+            android.content.SharedPreferences prefs =
+                    getSharedPreferences("gr_poll", MODE_PRIVATE);
+            android.content.SharedPreferences.Editor ed = prefs.edit()
                     .putString("rooms", roomsJson == null ? "[]" : roomsJson)
-                    .putString("pubkey", pubkeyHex == null ? "" : pubkeyHex)
-                    .apply();
+                    .putString("pubkey", pubkeyHex == null ? "" : pubkeyHex);
+            try {
+                org.json.JSONArray arr = new org.json.JSONArray(
+                        roomsJson == null ? "[]" : roomsJson);
+                for (int i = 0; i < arr.length(); i++) {
+                    org.json.JSONObject o = arr.optJSONObject(i);
+                    if (o == null) continue;
+                    String id = o.optString("id", "");
+                    long seen = o.optLong("seen", 0);
+                    if (id.length() == 64 && seen > 0) {
+                        String k = "lastSeen_" + id;
+                        if (seen > prefs.getLong(k, 0)) ed.putLong(k, seen);
+                    }
+                }
+            } catch (Exception ignored) { }
+            ed.apply();
+            ListenerService.kick(); // resubscribe with the fresh rooms/seen state
         }
 
         /**
          * Called from the chat page when the notification toggle flips:
-         * GreenRoom.setNotifyEnabled(true/false). Starts or stops the
-         * 15-minute background poll.
+         * GreenRoom.setNotifyEnabled(true/false). On = start the realtime
+         * foreground listener (and retire the 15-minute poll); off = stop
+         * everything.
          */
         @JavascriptInterface
         public void setNotifyEnabled(boolean on) {
             getSharedPreferences("gr_poll", MODE_PRIVATE).edit()
                     .putBoolean("notify_on", on)
                     .apply();
-            if (on) PollJobService.schedule(MainActivity.this);
-            else PollJobService.cancel(MainActivity.this);
+            if (on) {
+                PollJobService.cancel(MainActivity.this);
+                ListenerService.start(MainActivity.this);
+            } else {
+                ListenerService.stop(MainActivity.this);
+                PollJobService.cancel(MainActivity.this);
+            }
         }
     }
 

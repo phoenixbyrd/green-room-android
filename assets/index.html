@@ -280,7 +280,7 @@
       <button class="switch" id="notifyToggle" role="switch" aria-checked="false" aria-label="Message notifications"><span class="knob"></span></button>
       <label>Message notifications</label>
     </div>
-    <div class="hint">Pops up a notification when someone posts. In the Android app it uses system notifications and keeps checking about every 15 minutes even with the app closed. On this site it uses browser notifications and only fires while the site is open. If the toggle won't switch on, notifications are blocked for this site — allow them in your browser's site settings, then try again.</div>
+    <div class="hint">Pops up a notification when someone posts. In the Android app it keeps a quiet background listener so messages notify within a second or two even with the app closed — Android requires a small status entry while it listens, set to the least intrusive level (no icon, no sound; just a collapsed line at the bottom of the shade). On this site it uses browser notifications and only fires while the site is open. If the toggle won't switch on, notifications are blocked for this site — allow them in your browser's site settings, then try again.</div>
     <div class="row">
       <button class="btn primary" id="saveName">Save name</button>
       <button class="btn danger" id="newIdent">New identity</button>
@@ -413,13 +413,25 @@ function saveRooms(){
 function pushPollState(){
   try{
     if(window.GreenRoom && typeof window.GreenRoom.setPollState === "function" && typeof myPubHex === "string" && myPubHex){
-      window.GreenRoom.setPollState(JSON.stringify(rooms.map(r=>({id:r.id, name:r.name}))), myPubHex);
+      // per-room max created_at rendered — keeps the background listener
+      // from re-notifying messages already read while the app was open
+      const seenTs = {};
+      seen.forEach(ev=>{
+        const rid = roomOf(ev);
+        if(rid && ev.created_at > (seenTs[rid] || 0)) seenTs[rid] = ev.created_at;
+      });
+      window.GreenRoom.setPollState(JSON.stringify(rooms.map(r=>({id:r.id, name:r.name, seen:seenTs[r.id]||0}))), myPubHex);
     }
     if(window.GreenRoom && typeof window.GreenRoom.setNotifyEnabled === "function"){
       window.GreenRoom.setNotifyEnabled(!!notifyOn);
     }
   }catch(e){}
 }
+// when the app backgrounds, hand the native side fresh "seen" state so the
+// listener never re-notifies what was just read
+document.addEventListener("visibilitychange", ()=>{
+  if(document.hidden) pushPollState();
+});
 function roomName(id){ return (roomById[id] && roomById[id].name) || "a room"; }
 // which known room does this kind-42 belong to? (prefer the "root" marker)
 function roomOf(ev){
