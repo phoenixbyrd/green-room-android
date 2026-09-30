@@ -99,7 +99,7 @@ public class ListenerService extends Service {
                 NotificationChannel c = new NotificationChannel(
                         LISTEN_CHANNEL, "Listening",
                         NotificationManager.IMPORTANCE_MIN);
-                c.setDescription("Keeps the Green Room connection open for instant notifications. Silent.");
+                c.setDescription("Keeps the Muse Room connection open for instant notifications. Silent.");
                 c.setShowBadge(false);
                 nm.createNotificationChannel(c);
                 // Message alerts reuse the normal channel (already created by
@@ -163,7 +163,7 @@ public class ListenerService extends Service {
         Notification.Builder b = (Build.VERSION.SDK_INT >= 26)
                 ? new Notification.Builder(this, LISTEN_CHANNEL)
                 : new Notification.Builder(this);
-        b.setContentTitle("Green Room listening")
+        b.setContentTitle("Muse Room listening")
          .setContentText("Instant notifications on")
          .setSmallIcon(R.mipmap.ic_launcher)
          .setContentIntent(pi)
