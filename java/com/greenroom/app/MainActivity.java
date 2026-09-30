@@ -7,9 +7,12 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -17,6 +20,8 @@ import android.webkit.WebViewClient;
 public class MainActivity extends Activity {
     private WebView web;
     private int notifId = 1000;
+    private ValueCallback<Uri[]> filePathCallback;
+    private static final int REQ_PICK_IMAGE = 42;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -32,7 +37,28 @@ public class MainActivity extends Activity {
         s.setAllowFileAccessFromFileURLs(true);
         s.setAllowUniversalAccessFromFileURLs(true);
         web.addJavascriptInterface(new Bridge(), "GreenRoom");
+        web.addJavascriptInterface(new UploadBridge(), "AndroidUpload");
         web.setWebViewClient(new WebViewClient());
+        // <input type=file> needs a native picker in a WebView.
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView w, ValueCallback<Uri[]> cb,
+                                             FileChooserParams params) {
+                if (filePathCallback != null) filePathCallback.onReceiveValue(null);
+                filePathCallback = cb;
+                Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                i.setType("image/*");
+                try {
+                    startActivityForResult(Intent.createChooser(i, "Pick a picture"),
+                            REQ_PICK_IMAGE);
+                } catch (Exception e) {
+                    filePathCallback = null;
+                    return false;
+                }
+                return true;
+            }
+        });
         if (savedInstanceState != null) {
             web.restoreState(savedInstanceState);
         } else {
@@ -81,6 +107,88 @@ public class MainActivity extends Activity {
                     .apply();
             if (on) PollJobService.schedule(MainActivity.this);
             else PollJobService.cancel(MainActivity.this);
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_PICK_IMAGE && filePathCallback != null) {
+            Uri[] uris = null;
+            if (resultCode == Activity.RESULT_OK && data != null && data.getData() != null) {
+                uris = new Uri[]{data.getData()};
+            }
+            filePathCallback.onReceiveValue(uris);
+            filePathCallback = null;
+        }
+    }
+
+    /**
+     * Called from the chat page to upload a picture: AndroidUpload.uploadImage(base64Jpeg).
+     * Native POST to catbox (no auth, no CORS issues in native code). Result comes back
+     * via __androidImageResult(url) / __androidImageError(msg) in the page.
+     */
+    class UploadBridge {
+        @JavascriptInterface
+        public void uploadImage(String base64Jpeg) {
+            new Thread(new Runnable() {
+                @Override public void run() { doUpload(base64Jpeg); }
+            }).start();
+        }
+
+        private void doUpload(String base64Jpeg) {
+            try {
+                byte[] img = android.util.Base64.decode(base64Jpeg, android.util.Base64.DEFAULT);
+                String boundary = "----gr" + System.currentTimeMillis();
+                java.net.URL url = new java.net.URL("https://catbox.moe/user/api.php");
+                java.net.HttpURLConnection c =
+                        (java.net.HttpURLConnection) url.openConnection();
+                c.setDoOutput(true);
+                c.setRequestMethod("POST");
+                c.setRequestProperty("Content-Type",
+                        "multipart/form-data; boundary=" + boundary);
+                c.setConnectTimeout(30000);
+                c.setReadTimeout(120000);
+                java.io.OutputStream out = c.getOutputStream();
+                String head = "--" + boundary + "\r\n"
+                        + "Content-Disposition: form-data; name=\"reqtype\"\r\n\r\n"
+                        + "fileupload\r\n"
+                        + "--" + boundary + "\r\n"
+                        + "Content-Disposition: form-data; name=\"fileToUpload\"; "
+                        + "filename=\"image.jpg\"\r\n"
+                        + "Content-Type: image/jpeg\r\n\r\n";
+                out.write(head.getBytes("UTF-8"));
+                out.write(img);
+                out.write(("\r\n--" + boundary + "--\r\n").getBytes("UTF-8"));
+                out.flush();
+                out.close();
+                int code = c.getResponseCode();
+                java.io.InputStream in =
+                        (code == 200) ? c.getInputStream() : c.getErrorStream();
+                java.util.Scanner sc =
+                        new java.util.Scanner(in, "UTF-8").useDelimiter("\\A");
+                String resp = sc.hasNext() ? sc.next().trim() : "";
+                sc.close();
+                if (code == 200 && resp.startsWith("https://")) {
+                    postJs("__androidImageResult("
+                            + org.json.JSONObject.quote(resp) + ")");
+                } else {
+                    postJs("__androidImageError("
+                            + org.json.JSONObject.quote("HTTP " + code) + ")");
+                }
+            } catch (Exception e) {
+                postJs("__androidImageError(" + org.json.JSONObject.quote(
+                        e.getMessage() == null ? "upload failed" : e.getMessage()) + ")");
+            }
+        }
+
+        private void postJs(final String expr) {
+            runOnUiThread(new Runnable() {
+                @Override public void run() {
+                    // "javascript:" prefix keeps evaluateJavascript happy on old WebViews.
+                    web.evaluateJavascript("javascript:" + expr, null);
+                }
+            });
         }
     }
 
